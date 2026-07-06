@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>祈年殿七步动画展示</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            width: 100vw;
+            height: 100vh;
+            overflow: hidden;
+            background: #000;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        }
+        #kivicubeScene {
+            width: 100%;
+            height: 100%;
+            border: none;
+        }
+        #control-panel {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 20px;
+            z-index: 100;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            backdrop-filter: blur(10px);
+        }
+        #step-indicator {
+            font-size: 16px;
+            font-weight: bold;
+            color: #00ff88;
+        }
+        #status-text {
+            font-size: 14px;
+            color: #aaa;
+        }
+        button {
+            background: #00ff88;
+            color: black;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 10px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        button:hover {
+            background: #00cc6a;
+            transform: scale(1.05);
+        }
+        button:disabled {
+            background: #555;
+            color: #888;
+            cursor: not-allowed;
+            transform: none;
+        }
+        #progress-bar {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 200px;
+            height: 6px;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 3px;
+            overflow: hidden;
+            z-index: 100;
+        }
+        #progress-fill {
+            width: 0%;
+            height: 100%;
+            background: #00ff88;
+            transition: width 0.1s linear;
+        }
+    </style>
+</head>
+<body>
+    <div id="control-panel">
+        <span id="step-indicator">初始化中...</span>
+        <span id="status-text">等待场景加载</span>
+        <button id="restart-btn" disabled>重新播放</button>
+    </div>
+    
+    <div id="progress-bar">
+        <div id="progress-fill"></div>
+    </div>
+
+    <iframe id="kivicubeScene"></iframe>
+
+    <script src="https://www.kivicube.com/lib/iframe-plugin.js"></script>
+    <script>
+        const sceneId = '7J2HB8DKM5rJyJBqkjdog2FQmLG4Zlec';
+        
+        const stepIndicator = document.getElementById('step-indicator');
+        const statusText = document.getElementById('status-text');
+        const restartBtn = document.getElementById('restart-btn');
+        const progressFill = document.getElementById('progress-fill');
+
+        let api = null;
+        let animationInstance = null;
+        let isAnimating = false;
+
+        const steps = [
+            { name: '初始视角', duration: 3000 },
+            { name: '螺旋上升', duration: 6000 },
+            { name: '视角拉远', duration: 2000 },
+            { name: '组件分离', duration: 2000 },
+            { name: '保持状态', duration: 4000 },
+            { name: '组件重组', duration: 2000 },
+            { name: '旋转展示', duration: -1 }
+        ];
+
+        class TempleAnimation {
+            constructor(sceneApi) {
+                this.api = sceneApi;
+                this.models = [];
+                this.modelNames = [];
+                this.isAnimating = false;
+                this.currentStep = 0;
+                
+                this.config = {
+                    approachStartDist: 10,
+                    approachEndDist: 3,
+                    spiralRadius: 2,
+                    spiralHeight: 4,
+                    separationAmount: 0.5,
+                    rotationSpeed: 45
+                };
+            }
+
+            async init() {
+                this.models = await this.api.getAllObjects();
+                
+                const nameMap = new Map();
+                for (const model of this.models) {
+                    const name = await this.api.getObjectName(model);
+                    nameMap.set(model, name);
+                    if (name.startsWith('c') && !isNaN(name.slice(1))) {
+                        this.modelNames.push(name);
+                    }
+                }
+                
+                this.models.sort((a, b) => {
+                    const nameA = nameMap.get(a);
+                    const nameB = nameMap.get(b);
+                    if (!nameA || !nameB) return 0;
+                    const numA = parseInt(nameA.slice(1));
+                    const numB = parseInt(nameB.slice(1));
+                    return numA - numB;
+                });
+                
+                console.log(`找到 ${this.models.length} 个模型组件`);
+            }
+
+            async autoAssemble() {
+                console.log('开始自动组装模型...');
+                for (const model of this.models) {
+                    await this.api.setPosition(model, 0, 0, 0);
+                    await this.api.setRotation(model, 0, 0, 0);
+                    await this.api.setScale(model, 0.02, 0.02, 0.02);
+                }
+                console.log('模型组装完成');
+            }
+
+            async start() {
+                if (this.isAnimating) return;
+                this.isAnimating = true;
+                
+                await this.init();
+                await this.autoAssemble();
+                
+                await new Promise(r => setTimeout(r, 1000));
+                
+                await this.playSequence();
+            }
+
+            async playSequence() {
+                updateProgress(0);
+                
+                await this.step1_approach();
+                updateProgress(14);
+                
+                await this.step2_spiralUp();
+                updateProgress(43);
+                
+                await this.step3_pullAway();
+                updateProgress(52);
+                
+                await this.step4_separate();
+                updateProgress(61);
+                
+                await this.step5_hold();
+                updateProgress(80);
+                
+                await this.step6_recombine();
+                updateProgress(90);
+                
+                await this.step7_rotateLoop();
+            }
+
+            async step1_approach() {
+                updateStep('初始视角', '从远处10米逐渐靠近到3米');
+                const startTime = Date.now();
+                const duration = 3000;
+                const startPos = [0, 5, -10];
+                const endPos = [0, 3, -3];
+
+                return new Promise(resolve => {
+                    const animate = () => {
+                        const elapsed = Date.now() - startTime;
+                        const progress = Math.min(elapsed / duration, 1);
+                        const eased = this.easeInOutCubic(progress);
+                        
+                        const x = startPos[0] + (endPos[0] - startPos[0]) * eased;
+                        const y = startPos[1] + (endPos[1] - startPos[1]) * eased;
+                        const z = startPos[2] + (endPos[2] - startPos[2]) * eased;
+
+                        this.models.forEach(model => {
+                            this.api.setPosition(model, x, y, z);
+                        });
+
+                        if (progress < 1) {
+                            requestAnimationFrame(animate);
+                        } else {
+                            resolve();
+                        }
+                    };
+                    animate();
+                });
+            }
+
+            async step2_spiralUp() {
+                updateStep('螺旋上升', '沿螺旋路径向上移动，旋转2圈');
+                const startTime = Date.now();
+                const duration = 6000;
+
+                return new Promise(resolve => {
+                    const animate = () => {
+                        const elapsed = Date.now() - startTime;
+                        const progress = Math.min(elapsed / duration, 1);
+                        const eased = this.easeInOutCubic(progress);
+                        const angle = eased * 720 * Math.PI / 180;
+                        
+                        const x = Math.cos(angle) * this.config.spiralRadius;
+                        const y = 3 + eased * this.config.spiralHeight;
+                        const z = -3 + Math.sin(angle) * this.config.spiralRadius;
+
+                        this.models.forEach(model => {
+                            this.api.setPosition(model, x, y, z);
+                            this.api.setRotation(model, 0, eased * 720 * Math.PI / 180, 0);
+                        });
+
+                        if (progress < 1) {
+                            requestAnimationFrame(animate);
+                        } else {
+                            resolve();
+                        }
+                    };
+                    animate();
+                });
+            }
+
+            async step3_pullAway() {
+                updateStep('视角拉远', '拉远至合适观察距离');
+                const startTime = Date.now();
+                const duration = 2000;
+                const startPos = await this.api.getPosition(this.models[0]);
+                const endPos = [startPos[0], startPos[1], startPos[2] - 2];
+
+                return new Promise(resolve => {
+                    const animate = () => {
+                        const elapsed = Date.now() - startTime;
+                        const progress = Math.min(elapsed / duration, 1);
+                        const eased = this.easeInOutCubic(progress);
+                        
+                        const x = startPos[0] + (endPos[0] - startPos[0]) * eased;
+                        const y = startPos[1] + (endPos[1] - startPos[1]) * eased;
+                        const z = startPos[2] + (endPos[2] - startPos[2]) * eased;
+
+                        this.models.forEach(model => {
+                            this.api.setPosition(model, x, y, z);
+                        });
+
+                        if (progress < 1) {
+                            requestAnimationFrame(animate);
+                        } else {
+                            resolve();
+                        }
+                    };
+                    animate();
+                });
+            }
+
+            async step4_separate() {
+                updateStep('组件分离', '建筑组件分离效果');
+                const startTime = Date.now();
+                const duration = 2000;
+                
+                const positions = await Promise.all(
+                    this.models.map(model => this.api.getPosition(model))
+                );
+
+                const offsets = [
+                    [-0.3, 0.2, 0], [0.3, 0.2, 0], [-0.3, -0.2, 0], [0.3, -0.2, 0],
+                    [0, 0.4, 0], [0, -0.4, 0], [-0.2, 0.3, 0.2], [0.2, 0.3, 0.2],
+                    [-0.2, 0.3, -0.2], [0.2, 0.3, -0.2], [-0.3, -0.1, 0.3], [0.3, -0.1, 0.3],
+                    [-0.3, -0.1, -0.3], [0.3, -0.1, -0.3], [0, 0.5, 0.3], [0, 0.5, -0.3]
+                ];
+
+                return new Promise(resolve => {
+                    const animate = () => {
+                        const elapsed = Date.now() - startTime;
+                        const progress = Math.min(elapsed / duration, 1);
+                        const eased = this.easeOutCubic(progress);
+
+                        this.models.forEach((model, i) => {
+                            const offset = offsets[i % offsets.length];
+                            const pos = positions[i];
+                            this.api.setPosition(
+                                model,
+                                pos[0] + offset[0] * eased,
+                                pos[1] + offset[1] * eased,
+                                pos[2] + offset[2] * eased
+                            );
+                        });
+
+                        if (progress < 1) {
+                            requestAnimationFrame(animate);
+                        } else {
+                            resolve();
+                        }
+                    };
+                    animate();
+                });
+            }
+
+            async step5_hold() {
+                updateStep('保持状态', '分离状态保持4秒');
+                await new Promise(r => setTimeout(r, 4000));
+            }
+
+            async step6_recombine() {
+                updateStep('组件重组', '平滑恢复原状');
+                const startTime = Date.now();
+                const duration = 2000;
+                
+                const positions = await Promise.all(
+                    this.models.map(model => this.api.getPosition(model))
+                );
+                const targetPos = [0, 3, -5];
+
+                return new Promise(resolve => {
+                    const animate = () => {
+                        const elapsed = Date.now() - startTime;
+                        const progress = Math.min(elapsed / duration, 1);
+                        const eased = this.easeInOutCubic(progress);
+
+                        this.models.forEach((model, i) => {
+                            const pos = positions[i];
+                            this.api.setPosition(
+                                model,
+                                pos[0] + (targetPos[0] - pos[0]) * eased,
+                                pos[1] + (targetPos[1] - pos[1]) * eased,
+                                pos[2] + (targetPos[2] - pos[2]) * eased
+                            );
+                        });
+
+                        if (progress < 1) {
+                            requestAnimationFrame(animate);
+                        } else {
+                            resolve();
+                        }
+                    };
+                    animate();
+                });
+            }
+
+            async step7_rotateLoop() {
+                updateStep('旋转展示', '45度/秒速度循环旋转');
+                const startTime = Date.now();
+                
+                const animate = () => {
+                    if (!this.isAnimating) return;
+                    
+                    const elapsed = Date.now() - startTime;
+                    const rotationY = (elapsed / 1000) * this.config.rotationSpeed * Math.PI / 180;
+
+                    this.models.forEach(model => {
+                        this.api.setRotation(model, 0, rotationY, 0);
+                    });
+
+                    requestAnimationFrame(animate);
+                };
+                animate();
+            }
+
+            easeInOutCubic(t) {
+                return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+            }
+
+            easeOutCubic(t) {
+                return 1 - Math.pow(1 - t, 3);
+            }
+
+            stop() {
+                this.isAnimating = false;
+            }
+        }
+
+        function updateStep(name, desc) {
+            stepIndicator.textContent = name;
+            statusText.textContent = desc;
+        }
+
+        function updateProgress(percent) {
+            progressFill.style.width = percent + '%';
+        }
+
+        async function initScene() {
+            const iframe = document.getElementById('kivicubeScene');
+            
+            try {
+                await kivicubeIframePlugin.openKivicubeScene(iframe, {
+                    sceneId: sceneId,
+                    hideLogo: true,
+                    hideTitle: true,
+                    hideBackground: false,
+                    hideLoading: false
+                });
+                
+                iframe.addEventListener('ready', async (event) => {
+                    api = event.detail.api;
+                    console.log('场景初始化完成，API已连接');
+                    
+                    animationInstance = new TempleAnimation(api);
+                    restartBtn.disabled = false;
+                    
+                    await animationInstance.start();
+                });
+                
+            } catch (error) {
+                console.error('场景初始化失败:', error);
+                statusText.textContent = '初始化失败，请刷新重试';
+            }
+        }
+
+        restartBtn.addEventListener('click', async () => {
+            if (animationInstance) {
+                animationInstance.stop();
+            }
+            
+            restartBtn.disabled = true;
+            stepIndicator.textContent = '重新播放';
+            statusText.textContent = '正在重置...';
+            updateProgress(0);
+            
+            await new Promise(r => setTimeout(r, 500));
+            
+            animationInstance = new TempleAnimation(api);
+            await animationInstance.start();
+        });
+
+        if (sceneId === 'YOUR_SCENE_ID_HERE') {
+            alert('请先设置场景ID！\n\n获取方式：\n1. 在Kivicube中保存场景\n2. 点击右上角"分享"\n3. 复制链接\n4. 链接末尾的字符串就是sceneId');
+        } else {
+            initScene();
+        }
+    </script>
+</body>
+</html>
